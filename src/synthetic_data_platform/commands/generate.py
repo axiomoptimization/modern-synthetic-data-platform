@@ -3,6 +3,7 @@ import typer
 from synthetic_data_platform.app import Application
 from synthetic_data_platform.config import Settings
 from synthetic_data_platform.constants import SUPPORTED_ENTITIES
+from synthetic_data_platform.generators.agent_generator import AgentGenerator
 from synthetic_data_platform.generators.customer_generator import CustomerGenerator
 from synthetic_data_platform.telemetry.service import TelemetryService
 from synthetic_data_platform.utils.logging import get_logger
@@ -46,3 +47,33 @@ def generate_customers(
         )
 
     typer.echo(f"Wrote {len(customers)} customers to {output_path}")
+
+
+@app.command("agents")
+def generate_agents(
+    count: int = typer.Option(
+        20, "--count", "-n", min=1, help="Number of agent records to generate."
+    ),
+) -> None:
+    """Generate synthetic agent records and write them to the Bronze layer."""
+    application = Application.bootstrap()
+    settings = application.get(Settings)
+    telemetry = application.get(TelemetryService)
+    logger = get_logger()
+
+    with telemetry.start_run("generate_agents") as run:
+        logger.info("Starting agent generation", extra={"run_id": run.run_id})
+
+        generator = AgentGenerator(seed=settings.random_seed)
+        agents = generator.generate(count)
+
+        output_path = ParquetWriter().write(agents, settings.bronze_dir, "agents")
+
+        run.record_row_count("agents", len(agents))
+        run.add_output_location(str(output_path))
+        logger.info(
+            "Finished agent generation",
+            extra={"run_id": run.run_id},
+        )
+
+    typer.echo(f"Wrote {len(agents)} agents to {output_path}")
