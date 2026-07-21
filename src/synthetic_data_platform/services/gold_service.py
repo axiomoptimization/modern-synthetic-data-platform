@@ -7,6 +7,7 @@ from datetime import date, timedelta
 import polars as pl
 
 from synthetic_data_platform.config import Settings
+from synthetic_data_platform.models.dim_customer import DimCustomer
 from synthetic_data_platform.models.dim_date import DimDate
 from synthetic_data_platform.telemetry.models import PipelineRun
 from synthetic_data_platform.writers.parquet_writer import ParquetWriter
@@ -38,6 +39,38 @@ class GoldService:
         run.add_output_location(str(output_path))
         logger.info(f"Built dim_date with {len(dim_dates)} rows", extra={"run_id": run.run_id})
         return dim_dates
+
+    def build_dim_customer(
+        self, settings: Settings, run: PipelineRun, logger: logging.Logger
+    ) -> list[DimCustomer]:
+        path = settings.silver_dir / "customers.parquet"
+        if not path.exists():
+            self._warn(run, logger, "dim_customer: Silver customers not found, skipping")
+            return []
+
+        rows = pl.read_parquet(path).sort("customer_id").to_dicts()
+        dim_customers = [
+            DimCustomer(
+                customer_key=index + 1,
+                customer_id=row["customer_id"],
+                first_name=row["first_name"],
+                last_name=row["last_name"],
+                email=row["email"],
+                phone=row["phone"],
+                city=row["city"],
+                state=row["state"],
+                postal_code=row["postal_code"],
+            )
+            for index, row in enumerate(rows)
+        ]
+
+        output_path = ParquetWriter().write(dim_customers, settings.gold_dir, "dim_customer")
+        run.record_row_count("dim_customer", len(dim_customers))
+        run.add_output_location(str(output_path))
+        logger.info(
+            f"Built dim_customer with {len(dim_customers)} rows", extra={"run_id": run.run_id}
+        )
+        return dim_customers
 
     @staticmethod
     def _collect_date_bounds(settings: Settings) -> tuple[date, date] | None:
