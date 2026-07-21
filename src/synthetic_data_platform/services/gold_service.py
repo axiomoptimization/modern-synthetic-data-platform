@@ -12,6 +12,7 @@ from synthetic_data_platform.models.dim_agent import DimAgent
 from synthetic_data_platform.models.dim_customer import DimCustomer
 from synthetic_data_platform.models.dim_date import DimDate
 from synthetic_data_platform.models.fact_claim import FactClaim
+from synthetic_data_platform.models.fact_payment import FactPayment
 from synthetic_data_platform.models.fact_policy import FactPolicy
 from synthetic_data_platform.telemetry.models import PipelineRun
 from synthetic_data_platform.writers.parquet_writer import ParquetWriter
@@ -206,6 +207,54 @@ class GoldService:
             f"Built fact_claim with {len(fact_claims)} rows", extra={"run_id": run.run_id}
         )
         return fact_claims
+
+    def build_fact_payment(
+        self,
+        settings: Settings,
+        run: PipelineRun,
+        logger: logging.Logger,
+        policy_keys: dict[UUID, int],
+    ) -> list[FactPayment]:
+        path = settings.silver_dir / "payments.parquet"
+        if not path.exists():
+            self._warn(run, logger, "fact_payment: Silver payments not found, skipping")
+            return []
+
+        rows = pl.read_parquet(path).sort("payment_id").to_dicts()
+        fact_payments: list[FactPayment] = []
+        next_key = 1
+        for row in rows:
+            policy_key = policy_keys.get(UUID(row["policy_id"]))
+            if policy_key is None:
+                self._warn(
+                    run,
+                    logger,
+                    f"fact_payment: skipped payment {row['payment_id']} with unresolved "
+                    "policy key",
+                )
+                continue
+
+            fact_payments.append(
+                FactPayment(
+                    payment_key=next_key,
+                    payment_id=row["payment_id"],
+                    policy_key=policy_key,
+                    payment_date_key=self._date_key(date.fromisoformat(row["payment_date"])),
+                    payment_number=row["payment_number"],
+                    payment_method=row["payment_method"],
+                    status=row["status"],
+                    amount=row["amount"],
+                )
+            )
+            next_key += 1
+
+        output_path = ParquetWriter().write(fact_payments, settings.gold_dir, "fact_payment")
+        run.record_row_count("fact_payment", len(fact_payments))
+        run.add_output_location(str(output_path))
+        logger.info(
+            f"Built fact_payment with {len(fact_payments)} rows", extra={"run_id": run.run_id}
+        )
+        return fact_payments
 
     @staticmethod
     def _collect_date_bounds(settings: Settings) -> tuple[date, date] | None:
