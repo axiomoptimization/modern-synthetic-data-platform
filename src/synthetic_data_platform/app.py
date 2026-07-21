@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TypeVar
 
+from synthetic_data_platform.config import Settings
+
 ServiceT = TypeVar("ServiceT")
 
 
@@ -31,4 +33,6 @@ class Application:
     @classmethod
     def bootstrap(cls) -> Application:
         """Construct an Application with its default set of services."""
-        return cls()
+        app = cls()
+        app.register(Settings.load())
+        return app
