@@ -5,6 +5,8 @@ from synthetic_data_platform.config import Settings
 from synthetic_data_platform.constants import SUPPORTED_ENTITIES
 from synthetic_data_platform.generators.agent_generator import AgentGenerator
 from synthetic_data_platform.generators.customer_generator import CustomerGenerator
+from synthetic_data_platform.generators.policy_generator import PolicyGenerator
+from synthetic_data_platform.generators.sources import load_ids
 from synthetic_data_platform.telemetry.service import TelemetryService
 from synthetic_data_platform.utils.logging import get_logger
 from synthetic_data_platform.writers.parquet_writer import ParquetWriter
@@ -77,3 +79,42 @@ def generate_agents(
         )
 
     typer.echo(f"Wrote {len(agents)} agents to {output_path}")
+
+
+@app.command("policies")
+def generate_policies(
+    count: int = typer.Option(
+        200, "--count", "-n", min=1, help="Number of policy records to generate."
+    ),
+) -> None:
+    """Generate synthetic policy records referencing existing customers and agents."""
+    application = Application.bootstrap()
+    settings = application.get(Settings)
+    telemetry = application.get(TelemetryService)
+    logger = get_logger()
+
+    try:
+        customer_ids = load_ids(settings.bronze_dir / "customers.parquet", "customer_id")
+        agent_ids = load_ids(settings.bronze_dir / "agents.parquet", "agent_id")
+    except FileNotFoundError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    with telemetry.start_run("generate_policies") as run:
+        logger.info("Starting policy generation", extra={"run_id": run.run_id})
+
+        generator = PolicyGenerator(
+            seed=settings.random_seed, customer_ids=customer_ids, agent_ids=agent_ids
+        )
+        policies = generator.generate(count)
+
+        output_path = ParquetWriter().write(policies, settings.bronze_dir, "policies")
+
+        run.record_row_count("policies", len(policies))
+        run.add_output_location(str(output_path))
+        logger.info(
+            "Finished policy generation",
+            extra={"run_id": run.run_id},
+        )
+
+    typer.echo(f"Wrote {len(policies)} policies to {output_path}")
