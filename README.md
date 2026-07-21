@@ -10,6 +10,12 @@ and Power BI.
 
 See [PROJECT_CHARTER.md](PROJECT_CHARTER.md) for the full vision, goals, and roadmap.
 
+## Architecture Decision Records
+
+Significant design decisions are recorded under [docs/adr/](docs/adr/):
+
+* [0001. Gold layer star schema](docs/adr/0001-gold-layer-star-schema.md)
+
 ## Requirements
 
 * Python 3.12+
