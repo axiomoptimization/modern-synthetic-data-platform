@@ -4,6 +4,7 @@ from typing import TypeVar
 
 from synthetic_data_platform.config import Settings
 from synthetic_data_platform.telemetry.service import TelemetryService
+from synthetic_data_platform.utils.logging import configure_logging
 
 ServiceT = TypeVar("ServiceT")
 
@@ -35,6 +36,7 @@ class Application:
     def bootstrap(cls) -> Application:
         """Construct an Application with its default set of services."""
         app = cls()
-        app.register(Settings.load())
+        settings = app.register(Settings.load())
+        configure_logging(settings.log_dir)
         app.register(TelemetryService())
         return app
