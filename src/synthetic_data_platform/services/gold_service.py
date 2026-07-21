@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from datetime import date, timedelta
+from uuid import UUID
 
 import polars as pl
 
@@ -10,6 +11,7 @@ from synthetic_data_platform.config import Settings
 from synthetic_data_platform.models.dim_agent import DimAgent
 from synthetic_data_platform.models.dim_customer import DimCustomer
 from synthetic_data_platform.models.dim_date import DimDate
+from synthetic_data_platform.models.fact_policy import FactPolicy
 from synthetic_data_platform.telemetry.models import PipelineRun
 from synthetic_data_platform.writers.parquet_writer import ParquetWriter
 
@@ -101,6 +103,60 @@ class GoldService:
         logger.info(f"Built dim_agent with {len(dim_agents)} rows", extra={"run_id": run.run_id})
         return dim_agents
 
+    def build_fact_policy(
+        self,
+        settings: Settings,
+        run: PipelineRun,
+        logger: logging.Logger,
+        customer_keys: dict[UUID, int],
+        agent_keys: dict[UUID, int],
+    ) -> list[FactPolicy]:
+        path = settings.silver_dir / "policies.parquet"
+        if not path.exists():
+            self._warn(run, logger, "fact_policy: Silver policies not found, skipping")
+            return []
+
+        rows = pl.read_parquet(path).sort("policy_id").to_dicts()
+        fact_policies: list[FactPolicy] = []
+        next_key = 1
+        for row in rows:
+            customer_key = customer_keys.get(UUID(row["customer_id"]))
+            agent_key = agent_keys.get(UUID(row["agent_id"]))
+            if customer_key is None or agent_key is None:
+                self._warn(
+                    run,
+                    logger,
+                    f"fact_policy: skipped policy {row['policy_id']} with unresolved "
+                    "dimension key",
+                )
+                continue
+
+            fact_policies.append(
+                FactPolicy(
+                    policy_key=next_key,
+                    policy_id=row["policy_id"],
+                    customer_key=customer_key,
+                    agent_key=agent_key,
+                    effective_date_key=self._date_key(date.fromisoformat(row["effective_date"])),
+                    expiration_date_key=self._date_key(
+                        date.fromisoformat(row["expiration_date"])
+                    ),
+                    policy_number=row["policy_number"],
+                    policy_type=row["policy_type"],
+                    status=row["status"],
+                    premium_amount=row["premium_amount"],
+                )
+            )
+            next_key += 1
+
+        output_path = ParquetWriter().write(fact_policies, settings.gold_dir, "fact_policy")
+        run.record_row_count("fact_policy", len(fact_policies))
+        run.add_output_location(str(output_path))
+        logger.info(
+            f"Built fact_policy with {len(fact_policies)} rows", extra={"run_id": run.run_id}
+        )
+        return fact_policies
+
     @staticmethod
     def _collect_date_bounds(settings: Settings) -> tuple[date, date] | None:
         dates: list[date] = []
@@ -126,9 +182,13 @@ class GoldService:
             current += timedelta(days=1)
 
     @staticmethod
-    def _build_date_row(current: date) -> DimDate:
+    def _date_key(current: date) -> int:
+        return int(current.strftime("%Y%m%d"))
+
+    @classmethod
+    def _build_date_row(cls, current: date) -> DimDate:
         return DimDate(
-            date_key=int(current.strftime("%Y%m%d")),
+            date_key=cls._date_key(current),
             date=current,
             year=current.year,
             quarter=(current.month - 1) // 3 + 1,
