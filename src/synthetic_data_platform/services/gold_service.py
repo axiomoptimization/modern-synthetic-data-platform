@@ -11,6 +11,7 @@ from synthetic_data_platform.config import Settings
 from synthetic_data_platform.models.dim_agent import DimAgent
 from synthetic_data_platform.models.dim_customer import DimCustomer
 from synthetic_data_platform.models.dim_date import DimDate
+from synthetic_data_platform.models.fact_claim import FactClaim
 from synthetic_data_platform.models.fact_policy import FactPolicy
 from synthetic_data_platform.telemetry.models import PipelineRun
 from synthetic_data_platform.writers.parquet_writer import ParquetWriter
@@ -156,6 +157,55 @@ class GoldService:
             f"Built fact_policy with {len(fact_policies)} rows", extra={"run_id": run.run_id}
         )
         return fact_policies
+
+    def build_fact_claim(
+        self,
+        settings: Settings,
+        run: PipelineRun,
+        logger: logging.Logger,
+        policy_keys: dict[UUID, int],
+    ) -> list[FactClaim]:
+        path = settings.silver_dir / "claims.parquet"
+        if not path.exists():
+            self._warn(run, logger, "fact_claim: Silver claims not found, skipping")
+            return []
+
+        rows = pl.read_parquet(path).sort("claim_id").to_dicts()
+        fact_claims: list[FactClaim] = []
+        next_key = 1
+        for row in rows:
+            policy_key = policy_keys.get(UUID(row["policy_id"]))
+            if policy_key is None:
+                self._warn(
+                    run,
+                    logger,
+                    f"fact_claim: skipped claim {row['claim_id']} with unresolved policy key",
+                )
+                continue
+
+            fact_claims.append(
+                FactClaim(
+                    claim_key=next_key,
+                    claim_id=row["claim_id"],
+                    policy_key=policy_key,
+                    date_of_loss_key=self._date_key(date.fromisoformat(row["date_of_loss"])),
+                    report_date_key=self._date_key(date.fromisoformat(row["report_date"])),
+                    claim_number=row["claim_number"],
+                    claim_type=row["claim_type"],
+                    status=row["status"],
+                    claim_amount=row["claim_amount"],
+                    paid_amount=row["paid_amount"],
+                )
+            )
+            next_key += 1
+
+        output_path = ParquetWriter().write(fact_claims, settings.gold_dir, "fact_claim")
+        run.record_row_count("fact_claim", len(fact_claims))
+        run.add_output_location(str(output_path))
+        logger.info(
+            f"Built fact_claim with {len(fact_claims)} rows", extra={"run_id": run.run_id}
+        )
+        return fact_claims
 
     @staticmethod
     def _collect_date_bounds(settings: Settings) -> tuple[date, date] | None:

@@ -283,3 +283,66 @@ def test_build_fact_policy_without_silver_data_warns_without_raising(
     assert rows == []
     assert not (settings.gold_dir / "fact_policy.parquet").exists()
     assert any("Silver policies not found" in w for w in run.warnings)
+
+
+def _make_claim(**overrides: object) -> Claim:
+    kwargs: dict[str, object] = {
+        "claim_number": "CLM-A1B2C3D4",
+        "policy_id": uuid4(),
+        "claim_type": "collision",
+        "date_of_loss": date(2024, 3, 1),
+        "report_date": date(2024, 3, 2),
+        "claim_amount": 5000.0,
+    }
+    kwargs.update(overrides)
+    return Claim(**kwargs)
+
+
+def test_build_fact_claim_resolves_policy_key(tmp_path: Path, logger: logging.Logger) -> None:
+    settings = _settings(tmp_path)
+    policy = _make_policy()
+    claim = _make_claim(policy_id=policy.policy_id)
+    ParquetWriter().write([claim], settings.silver_dir, "claims")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_claim(
+            settings, run, logger, policy_keys={policy.policy_id: 3}
+        )
+
+    assert len(rows) == 1
+    assert rows[0].policy_key == 3
+    assert rows[0].date_of_loss_key == 20240301
+    assert rows[0].report_date_key == 20240302
+    assert rows[0].claim_key == 1
+    assert run.row_counts["fact_claim"] == 1
+
+
+def test_build_fact_claim_skips_rows_with_unresolved_policy_key(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    resolvable = _make_claim()
+    unresolvable = _make_claim(claim_number="CLM-Z9Y8X7W6")
+    ParquetWriter().write([resolvable, unresolvable], settings.silver_dir, "claims")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_claim(
+            settings, run, logger, policy_keys={resolvable.policy_id: 1}
+        )
+
+    assert len(rows) == 1
+    assert rows[0].claim_id == resolvable.claim_id
+    assert any("unresolved policy key" in w for w in run.warnings)
+
+
+def test_build_fact_claim_without_silver_data_warns_without_raising(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_claim(settings, run, logger, {})
+
+    assert rows == []
+    assert not (settings.gold_dir / "fact_claim.parquet").exists()
+    assert any("Silver claims not found" in w for w in run.warnings)
