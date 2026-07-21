@@ -4,9 +4,10 @@ from synthetic_data_platform.app import Application
 from synthetic_data_platform.config import Settings
 from synthetic_data_platform.constants import SUPPORTED_ENTITIES
 from synthetic_data_platform.generators.agent_generator import AgentGenerator
+from synthetic_data_platform.generators.claim_generator import ClaimGenerator
 from synthetic_data_platform.generators.customer_generator import CustomerGenerator
 from synthetic_data_platform.generators.policy_generator import PolicyGenerator
-from synthetic_data_platform.generators.sources import load_ids
+from synthetic_data_platform.generators.sources import load_ids, load_ids_where
 from synthetic_data_platform.telemetry.service import TelemetryService
 from synthetic_data_platform.utils.logging import get_logger
 from synthetic_data_platform.writers.parquet_writer import ParquetWriter
@@ -118,3 +119,49 @@ def generate_policies(
         )
 
     typer.echo(f"Wrote {len(policies)} policies to {output_path}")
+
+
+@app.command("claims")
+def generate_claims(
+    count: int = typer.Option(
+        150, "--count", "-n", min=1, help="Number of claim records to generate."
+    ),
+) -> None:
+    """Generate synthetic claim records referencing existing, active policies."""
+    application = Application.bootstrap()
+    settings = application.get(Settings)
+    telemetry = application.get(TelemetryService)
+    logger = get_logger()
+
+    try:
+        policy_ids = load_ids_where(
+            settings.bronze_dir / "policies.parquet", "policy_id", "status", "active"
+        )
+    except FileNotFoundError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not policy_ids:
+        typer.secho(
+            "No active policies found. Generate policies before generating claims.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    with telemetry.start_run("generate_claims") as run:
+        logger.info("Starting claim generation", extra={"run_id": run.run_id})
+
+        generator = ClaimGenerator(seed=settings.random_seed, policy_ids=policy_ids)
+        claims = generator.generate(count)
+
+        output_path = ParquetWriter().write(claims, settings.bronze_dir, "claims")
+
+        run.record_row_count("claims", len(claims))
+        run.add_output_location(str(output_path))
+        logger.info(
+            "Finished claim generation",
+            extra={"run_id": run.run_id},
+        )
+
+    typer.echo(f"Wrote {len(claims)} claims to {output_path}")

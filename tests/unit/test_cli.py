@@ -97,3 +97,36 @@ def test_generate_policies_fails_clearly_without_parent_data(
 
     assert result.exit_code == 1
     assert "does not exist" in result.output
+
+
+def test_generate_claims_writes_parquet_with_referential_integrity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["generate", "customers", "--count", "5"])
+    runner.invoke(app, ["generate", "agents", "--count", "2"])
+    runner.invoke(app, ["generate", "policies", "--count", "10"])
+
+    result = runner.invoke(app, ["generate", "claims", "--count", "15"])
+
+    assert result.exit_code == 0
+    bronze_dir = tmp_path / "output" / "bronze"
+    output_path = bronze_dir / "claims.parquet"
+    assert output_path.exists()
+
+    claims = pl.read_parquet(output_path)
+    policy_ids = set(pl.read_parquet(bronze_dir / "policies.parquet")["policy_id"])
+
+    assert claims.height == 15
+    assert set(claims["policy_id"]) <= policy_ids
+
+
+def test_generate_claims_fails_clearly_without_parent_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["generate", "claims", "--count", "10"])
+
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
