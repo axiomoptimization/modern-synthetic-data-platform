@@ -6,6 +6,7 @@ from synthetic_data_platform.constants import SUPPORTED_ENTITIES
 from synthetic_data_platform.generators.agent_generator import AgentGenerator
 from synthetic_data_platform.generators.claim_generator import ClaimGenerator
 from synthetic_data_platform.generators.customer_generator import CustomerGenerator
+from synthetic_data_platform.generators.payment_generator import PaymentGenerator
 from synthetic_data_platform.generators.policy_generator import PolicyGenerator
 from synthetic_data_platform.generators.sources import load_ids, load_ids_where
 from synthetic_data_platform.telemetry.service import TelemetryService
@@ -165,3 +166,39 @@ def generate_claims(
         )
 
     typer.echo(f"Wrote {len(claims)} claims to {output_path}")
+
+
+@app.command("payments")
+def generate_payments(
+    count: int = typer.Option(
+        300, "--count", "-n", min=1, help="Number of payment records to generate."
+    ),
+) -> None:
+    """Generate synthetic payment records referencing existing policies."""
+    application = Application.bootstrap()
+    settings = application.get(Settings)
+    telemetry = application.get(TelemetryService)
+    logger = get_logger()
+
+    try:
+        policy_ids = load_ids(settings.bronze_dir / "policies.parquet", "policy_id")
+    except FileNotFoundError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    with telemetry.start_run("generate_payments") as run:
+        logger.info("Starting payment generation", extra={"run_id": run.run_id})
+
+        generator = PaymentGenerator(seed=settings.random_seed, policy_ids=policy_ids)
+        payments = generator.generate(count)
+
+        output_path = ParquetWriter().write(payments, settings.bronze_dir, "payments")
+
+        run.record_row_count("payments", len(payments))
+        run.add_output_location(str(output_path))
+        logger.info(
+            "Finished payment generation",
+            extra={"run_id": run.run_id},
+        )
+
+    typer.echo(f"Wrote {len(payments)} payments to {output_path}")
