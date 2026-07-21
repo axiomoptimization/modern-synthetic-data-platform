@@ -207,3 +207,79 @@ def test_build_dim_agent_without_silver_data_warns_without_raising(
     assert rows == []
     assert not (settings.gold_dir / "dim_agent.parquet").exists()
     assert any("Silver agents not found" in w for w in run.warnings)
+
+
+def _make_policy(**overrides: object) -> Policy:
+    kwargs: dict[str, object] = {
+        "policy_number": "POL-A1B2C3D4",
+        "customer_id": uuid4(),
+        "agent_id": uuid4(),
+        "policy_type": "auto",
+        "effective_date": date(2024, 1, 10),
+        "expiration_date": date(2025, 1, 10),
+        "premium_amount": 1200.0,
+    }
+    kwargs.update(overrides)
+    return Policy(**kwargs)
+
+
+def test_build_fact_policy_resolves_dimension_keys(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    customer = _make_customer()
+    agent = _make_agent()
+    policy = _make_policy(customer_id=customer.customer_id, agent_id=agent.agent_id)
+    ParquetWriter().write([policy], settings.silver_dir, "policies")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_policy(
+            settings,
+            run,
+            logger,
+            customer_keys={customer.customer_id: 7},
+            agent_keys={agent.agent_id: 9},
+        )
+
+    assert len(rows) == 1
+    assert rows[0].customer_key == 7
+    assert rows[0].agent_key == 9
+    assert rows[0].effective_date_key == 20240110
+    assert rows[0].expiration_date_key == 20250110
+    assert rows[0].policy_key == 1
+    assert run.row_counts["fact_policy"] == 1
+
+
+def test_build_fact_policy_skips_rows_with_unresolved_dimension_keys(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    resolvable = _make_policy()
+    unresolvable = _make_policy(policy_number="POL-Z9Y8X7W6")
+    ParquetWriter().write([resolvable, unresolvable], settings.silver_dir, "policies")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_policy(
+            settings,
+            run,
+            logger,
+            customer_keys={resolvable.customer_id: 1},
+            agent_keys={resolvable.agent_id: 1},
+        )
+
+    assert len(rows) == 1
+    assert rows[0].policy_id == resolvable.policy_id
+    assert any("unresolved dimension key" in w for w in run.warnings)
+
+
+def test_build_fact_policy_without_silver_data_warns_without_raising(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_policy(settings, run, logger, {}, {})
+
+    assert rows == []
+    assert not (settings.gold_dir / "fact_policy.parquet").exists()
+    assert any("Silver policies not found" in w for w in run.warnings)
