@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Iterator
+from datetime import date, timedelta
+
+import polars as pl
+
+from synthetic_data_platform.config import Settings
+from synthetic_data_platform.models.dim_date import DimDate
+from synthetic_data_platform.telemetry.models import PipelineRun
+from synthetic_data_platform.writers.parquet_writer import ParquetWriter
+
+# Silver files and date columns that determine dim_date's coverage range.
+_SILVER_DATE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "policies": ("effective_date", "expiration_date"),
+    "claims": ("date_of_loss", "report_date"),
+    "payments": ("payment_date",),
+}
+
+
+class GoldService:
+    """Builds Gold layer dimension and fact tables from validated Silver data."""
+
+    def build_dim_date(
+        self, settings: Settings, run: PipelineRun, logger: logging.Logger
+    ) -> list[DimDate]:
+        bounds = self._collect_date_bounds(settings)
+        if bounds is None:
+            self._warn(run, logger, "dim_date: no Silver date columns found, skipping")
+            return []
+
+        start, end = bounds
+        dim_dates = [self._build_date_row(current) for current in self._date_range(start, end)]
+
+        output_path = ParquetWriter().write(dim_dates, settings.gold_dir, "dim_date")
+        run.record_row_count("dim_date", len(dim_dates))
+        run.add_output_location(str(output_path))
+        logger.info(f"Built dim_date with {len(dim_dates)} rows", extra={"run_id": run.run_id})
+        return dim_dates
+
+    @staticmethod
+    def _collect_date_bounds(settings: Settings) -> tuple[date, date] | None:
+        dates: list[date] = []
+        for file_name, columns in _SILVER_DATE_COLUMNS.items():
+            path = settings.silver_dir / f"{file_name}.parquet"
+            if not path.exists():
+                continue
+            frame = pl.read_parquet(path, columns=list(columns))
+            for column in columns:
+                dates.extend(
+                    date.fromisoformat(value) for value in frame[column].drop_nulls().to_list()
+                )
+
+        if not dates:
+            return None
+        return min(dates), max(dates)
+
+    @staticmethod
+    def _date_range(start: date, end: date) -> Iterator[date]:
+        current = start
+        while current <= end:
+            yield current
+            current += timedelta(days=1)
+
+    @staticmethod
+    def _build_date_row(current: date) -> DimDate:
+        return DimDate(
+            date_key=int(current.strftime("%Y%m%d")),
+            date=current,
+            year=current.year,
+            quarter=(current.month - 1) // 3 + 1,
+            month=current.month,
+            month_name=current.strftime("%B"),
+            day=current.day,
+            day_of_week=current.isoweekday(),
+            day_name=current.strftime("%A"),
+            is_weekend=current.isoweekday() >= 6,
+        )
+
+    @staticmethod
+    def _warn(run: PipelineRun, logger: logging.Logger, message: str) -> None:
+        run.add_warning(message)
+        logger.warning(message, extra={"run_id": run.run_id})
