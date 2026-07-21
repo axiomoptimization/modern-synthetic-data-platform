@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import polars as pl
+import pytest
 from typer.testing import CliRunner
 
 from synthetic_data_platform import __version__
@@ -33,3 +37,16 @@ def test_generate_list_shows_supported_entities() -> None:
     assert result.exit_code == 0
     assert "customers" in result.output
     assert "agents" in result.output
+
+
+def test_generate_customers_writes_parquet_to_bronze(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["generate", "customers", "--count", "5"])
+
+    assert result.exit_code == 0
+    output_path = tmp_path / "output" / "bronze" / "customers.parquet"
+    assert output_path.exists()
+    assert pl.read_parquet(output_path).height == 5

@@ -11,6 +11,7 @@ dependencies = [
     "polars>=1.17.1",
     "pyarrow>=18.1.0",
     "rich>=13.9.4",
+    "faker>=40.32.0",
 ]
 
 [project.scripts]
