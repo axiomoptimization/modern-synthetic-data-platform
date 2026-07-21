@@ -7,6 +7,7 @@ import pytest
 
 from synthetic_data_platform.config import Settings
 from synthetic_data_platform.models.claim import Claim
+from synthetic_data_platform.models.customer import Customer
 from synthetic_data_platform.models.payment import Payment
 from synthetic_data_platform.models.policy import Policy
 from synthetic_data_platform.services.gold_service import GoldService
@@ -100,3 +101,64 @@ def test_build_dim_date_without_silver_data_warns_without_raising(
     assert rows == []
     assert not (settings.gold_dir / "dim_date.parquet").exists()
     assert any("no Silver date columns" in w for w in run.warnings)
+
+
+def _make_customer(**overrides: object) -> Customer:
+    kwargs: dict[str, object] = {
+        "first_name": "Jane",
+        "last_name": "Doe",
+        "email": "jane.doe@example.com",
+        "phone": "555-123-4567",
+        "date_of_birth": date(1990, 1, 1),
+        "address_line1": "123 Main St",
+        "city": "Springfield",
+        "state": "IL",
+        "postal_code": "62704",
+    }
+    kwargs.update(overrides)
+    return Customer(**kwargs)
+
+
+def test_build_dim_customer_writes_all_rows_with_surrogate_keys(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    customers = [_make_customer(), _make_customer(email="other@example.com")]
+    ParquetWriter().write(customers, settings.silver_dir, "customers")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_dim_customer(settings, run, logger)
+
+    assert len(rows) == 2
+    assert {row.customer_key for row in rows} == {1, 2}
+    assert {row.customer_id for row in rows} == {c.customer_id for c in customers}
+    assert run.row_counts["dim_customer"] == 2
+
+
+def test_build_dim_customer_surrogate_keys_are_deterministic(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    customers = [_make_customer(), _make_customer(email="other@example.com")]
+    ParquetWriter().write(customers, settings.silver_dir, "customers")
+
+    with TelemetryService().start_run("test") as run:
+        first = GoldService().build_dim_customer(settings, run, logger)
+        second = GoldService().build_dim_customer(settings, run, logger)
+
+    first_keys = {row.customer_id: row.customer_key for row in first}
+    second_keys = {row.customer_id: row.customer_key for row in second}
+    assert first_keys == second_keys
+
+
+def test_build_dim_customer_without_silver_data_warns_without_raising(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_dim_customer(settings, run, logger)
+
+    assert rows == []
+    assert not (settings.gold_dir / "dim_customer.parquet").exists()
+    assert any("Silver customers not found" in w for w in run.warnings)
