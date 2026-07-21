@@ -50,3 +50,16 @@ def test_generate_customers_writes_parquet_to_bronze(
     output_path = tmp_path / "output" / "bronze" / "customers.parquet"
     assert output_path.exists()
     assert pl.read_parquet(output_path).height == 5
+
+
+def test_generate_agents_writes_parquet_to_bronze(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["generate", "agents", "--count", "5"])
+
+    assert result.exit_code == 0
+    output_path = tmp_path / "output" / "bronze" / "agents.parquet"
+    assert output_path.exists()
+    assert pl.read_parquet(output_path).height == 5
