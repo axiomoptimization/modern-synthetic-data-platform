@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from synthetic_data_platform.config import Settings
+from synthetic_data_platform.models.agent import Agent
 from synthetic_data_platform.models.claim import Claim
 from synthetic_data_platform.models.customer import Customer
 from synthetic_data_platform.models.payment import Payment
@@ -162,3 +163,47 @@ def test_build_dim_customer_without_silver_data_warns_without_raising(
     assert rows == []
     assert not (settings.gold_dir / "dim_customer.parquet").exists()
     assert any("Silver customers not found" in w for w in run.warnings)
+
+
+def _make_agent(**overrides: object) -> Agent:
+    kwargs: dict[str, object] = {
+        "first_name": "Sam",
+        "last_name": "Rivera",
+        "email": "sam.rivera@example.com",
+        "phone": "555-987-6543",
+        "agency_name": "Rivera Insurance Group",
+        "license_number": "ABC12345",
+        "license_state": "IL",
+        "hire_date": date(2015, 6, 1),
+    }
+    kwargs.update(overrides)
+    return Agent(**kwargs)
+
+
+def test_build_dim_agent_writes_all_rows_with_surrogate_keys(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    agents = [_make_agent(), _make_agent(email="other@example.com")]
+    ParquetWriter().write(agents, settings.silver_dir, "agents")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_dim_agent(settings, run, logger)
+
+    assert len(rows) == 2
+    assert {row.agent_key for row in rows} == {1, 2}
+    assert {row.agent_id for row in rows} == {a.agent_id for a in agents}
+    assert run.row_counts["dim_agent"] == 2
+
+
+def test_build_dim_agent_without_silver_data_warns_without_raising(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_dim_agent(settings, run, logger)
+
+    assert rows == []
+    assert not (settings.gold_dir / "dim_agent.parquet").exists()
+    assert any("Silver agents not found" in w for w in run.warnings)
