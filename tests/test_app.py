@@ -1,6 +1,7 @@
 import pytest
 
 from synthetic_data_platform.app import Application
+from synthetic_data_platform.config import Settings
 
 
 class _FakeService:
@@ -11,6 +12,11 @@ class _FakeService:
 def test_bootstrap_returns_application() -> None:
     app = Application.bootstrap()
     assert isinstance(app, Application)
+
+
+def test_bootstrap_registers_default_settings() -> None:
+    app = Application.bootstrap()
+    assert isinstance(app.get(Settings), Settings)
 
 
 def test_register_and_get_returns_same_instance() -> None:
