@@ -63,3 +63,37 @@ def test_generate_agents_writes_parquet_to_bronze(
     output_path = tmp_path / "output" / "bronze" / "agents.parquet"
     assert output_path.exists()
     assert pl.read_parquet(output_path).height == 5
+
+
+def test_generate_policies_writes_parquet_with_referential_integrity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["generate", "customers", "--count", "5"])
+    runner.invoke(app, ["generate", "agents", "--count", "2"])
+
+    result = runner.invoke(app, ["generate", "policies", "--count", "10"])
+
+    assert result.exit_code == 0
+    output_path = tmp_path / "output" / "bronze" / "policies.parquet"
+    assert output_path.exists()
+
+    bronze_dir = tmp_path / "output" / "bronze"
+    policies = pl.read_parquet(output_path)
+    customer_ids = set(pl.read_parquet(bronze_dir / "customers.parquet")["customer_id"])
+    agent_ids = set(pl.read_parquet(bronze_dir / "agents.parquet")["agent_id"])
+
+    assert policies.height == 10
+    assert set(policies["customer_id"]) <= customer_ids
+    assert set(policies["agent_id"]) <= agent_ids
+
+
+def test_generate_policies_fails_clearly_without_parent_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["generate", "policies", "--count", "10"])
+
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
