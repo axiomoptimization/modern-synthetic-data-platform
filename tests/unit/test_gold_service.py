@@ -346,3 +346,64 @@ def test_build_fact_claim_without_silver_data_warns_without_raising(
     assert rows == []
     assert not (settings.gold_dir / "fact_claim.parquet").exists()
     assert any("Silver claims not found" in w for w in run.warnings)
+
+
+def _make_payment(**overrides: object) -> Payment:
+    kwargs: dict[str, object] = {
+        "payment_number": "PMT-A1B2C3D4",
+        "policy_id": uuid4(),
+        "payment_date": date(2024, 4, 1),
+        "amount": 150.0,
+        "payment_method": "credit_card",
+    }
+    kwargs.update(overrides)
+    return Payment(**kwargs)
+
+
+def test_build_fact_payment_resolves_policy_key(tmp_path: Path, logger: logging.Logger) -> None:
+    settings = _settings(tmp_path)
+    policy = _make_policy()
+    payment = _make_payment(policy_id=policy.policy_id)
+    ParquetWriter().write([payment], settings.silver_dir, "payments")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_payment(
+            settings, run, logger, policy_keys={policy.policy_id: 5}
+        )
+
+    assert len(rows) == 1
+    assert rows[0].policy_key == 5
+    assert rows[0].payment_date_key == 20240401
+    assert rows[0].payment_key == 1
+    assert run.row_counts["fact_payment"] == 1
+
+
+def test_build_fact_payment_skips_rows_with_unresolved_policy_key(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+    resolvable = _make_payment()
+    unresolvable = _make_payment(payment_number="PMT-Z9Y8X7W6")
+    ParquetWriter().write([resolvable, unresolvable], settings.silver_dir, "payments")
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_payment(
+            settings, run, logger, policy_keys={resolvable.policy_id: 1}
+        )
+
+    assert len(rows) == 1
+    assert rows[0].payment_id == resolvable.payment_id
+    assert any("unresolved policy key" in w for w in run.warnings)
+
+
+def test_build_fact_payment_without_silver_data_warns_without_raising(
+    tmp_path: Path, logger: logging.Logger
+) -> None:
+    settings = _settings(tmp_path)
+
+    with TelemetryService().start_run("test") as run:
+        rows = GoldService().build_fact_payment(settings, run, logger, {})
+
+    assert rows == []
+    assert not (settings.gold_dir / "fact_payment.parquet").exists()
+    assert any("Silver payments not found" in w for w in run.warnings)
