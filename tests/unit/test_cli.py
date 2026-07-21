@@ -16,6 +16,7 @@ def test_help_displays_successfully() -> None:
 
     assert result.exit_code == 0
     assert "generate" in result.output
+    assert "validate" in result.output
 
 
 def test_version_command() -> None:
@@ -207,6 +208,17 @@ def test_generate_all_produces_a_complete_referentially_consistent_bronze_layer(
     assert set(policies["agent_id"]) <= agent_ids
     assert set(claims["policy_id"]) <= set(policies["policy_id"])
     assert set(payments["policy_id"]) <= set(policies["policy_id"])
+
+
+def test_validate_runs_cleanly_with_no_bronze_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["validate"])
+
+    assert result.exit_code == 0
+    assert "5 warning(s)" in result.output
 
 
 def test_generate_all_captures_row_counts_in_a_single_telemetry_run(
