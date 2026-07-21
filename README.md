@@ -50,6 +50,20 @@ uv run ruff check .
 uv run mypy src
 ```
 
+### Tests
+
+Tests are organized by type under `tests/`:
+
+* `tests/unit/` — fast, isolated tests with no external dependencies
+* `tests/integration/` — tests that exercise multiple components together (e.g. Fabric, SQL Server)
+* `tests/smoke/` — end-to-end checks that a deployed environment is working
+
+```bash
+uv run pytest tests/unit
+uv run pytest tests/integration
+uv run pytest tests/smoke
+```
+
 ## License
 
 MIT
