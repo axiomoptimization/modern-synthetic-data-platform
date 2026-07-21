@@ -2,6 +2,7 @@ import typer
 
 from synthetic_data_platform import __version__
 from synthetic_data_platform.commands import generate
+from synthetic_data_platform.commands.validate import validate_bronze
 
 app = typer.Typer(
     name="synthetic-data",
@@ -9,6 +10,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(generate.app, name="generate")
+app.command("validate")(validate_bronze)
 
 
 @app.callback()
