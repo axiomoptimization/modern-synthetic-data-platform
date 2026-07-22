@@ -17,6 +17,7 @@ def test_help_displays_successfully() -> None:
     assert result.exit_code == 0
     assert "generate" in result.output
     assert "validate" in result.output
+    assert "transform" in result.output
 
 
 def test_version_command() -> None:
@@ -219,6 +220,17 @@ def test_validate_runs_cleanly_with_no_bronze_data(
 
     assert result.exit_code == 0
     assert "5 warning(s)" in result.output
+
+
+def test_transform_fails_clearly_without_silver_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["transform"])
+
+    assert result.exit_code == 1
+    assert "No Silver data found" in result.output
 
 
 def test_generate_all_captures_row_counts_in_a_single_telemetry_run(
