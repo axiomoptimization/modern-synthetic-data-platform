@@ -2,6 +2,7 @@ import typer
 
 from synthetic_data_platform import __version__
 from synthetic_data_platform.commands import generate
+from synthetic_data_platform.commands.transform import transform_gold
 from synthetic_data_platform.commands.validate import validate_bronze
 
 app = typer.Typer(
@@ -11,6 +12,7 @@ app = typer.Typer(
 )
 app.add_typer(generate.app, name="generate")
 app.command("validate")(validate_bronze)
+app.command("transform")(transform_gold)
 
 
 @app.callback()
