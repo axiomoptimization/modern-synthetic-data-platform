@@ -16,6 +16,13 @@ Significant design decisions are recorded under [docs/adr/](docs/adr/):
 
 * [0001. Gold layer star schema](docs/adr/0001-gold-layer-star-schema.md)
 
+## Loading into Microsoft Fabric
+
+`generate`, `validate`, and `transform` are fully local and require no cloud account. To load the
+resulting Gold layer into Microsoft Fabric and build a Power BI dashboard, see
+[docs/fabric-setup.md](docs/fabric-setup.md) for prerequisites and setup steps, and copy
+[`.env.example`](.env.example) to `.env` for the environment variables it references.
+
 ## Requirements
 
 * Python 3.12+
