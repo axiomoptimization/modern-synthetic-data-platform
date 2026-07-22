@@ -44,3 +44,6 @@ strict = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests/unit", "tests/integration", "tests/smoke"]
+markers = [
+    "smoke: end-to-end checks that exercise the installed CLI as a subprocess",
+]
